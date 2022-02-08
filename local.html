@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title></title>
+</head>
+<body>
+
+	<p id="uuid"></p>
+	<input type="text" id="room">
+	<button id="startBtn">Start</button>
+	<video id="gum-local" autoplay playsinline></video>
+	<input type="range" min="0" max="100" value="0" id="myRange">
+
+	<script type="module">
+		import { io } from "https://cdn.socket.io/4.3.2/socket.io.esm.min.js";
+
+		const config = {
+			iceServers : [{
+				urls: ["stun:stun.l.google.com:19302"]
+			},{
+				urls: "turn:13.125.250.138", credential: 'pass', username: 'usr'
+			}]
+		};
+
+		const videoElement = document.querySelector('video');
+		const sliderInput = document.getElementById('myRange');
+		const uuidElement = document.getElementById('uuid');
+		const roomInput = document.getElementById('room');
+		const startButton = document.getElementById('startBtn');
+
+		let pc = new RTCPeerConnection(config);
+		const dc = pc.createDataChannel("channel");
+
+		const localStream = await navigator.mediaDevices.getUserMedia({
+			'video': true,
+			'audio': true
+		});
+		videoElement.srcObject = localStream;
+
+		startButton.addEventListener('click', e => {
+			start(roomInput.value);
+		});
+
+		sliderInput.addEventListener('input', e => {
+			dc.send(sliderInput.value);
+		});
+
+		// Websocket
+		var socket = io();
+
+		socket.on('id', msg => {
+			uuidElement.innerHTML = msg;
+		});
+
+		socket.on('icecandidate', candidate => {
+			console.log(candidate);
+			pc.addIceCandidate(new RTCIceCandidate(candidate));
+		});
+
+		socket.on('answer', answer => {
+			console.log(answer);
+			pc.setRemoteDescription(new RTCSessionDescription(answer));
+		});
+
+		socket.on('lost', _ => {
+			alert('lost!');
+		});
+
+		function start(roomName){
+			localStream.getTracks().forEach(track => {
+				pc.addTrack(track, localStream);
+			});
+
+			dc.onmessage = e => console.log("Just got a message " + e.data);
+			dc.onopen = e => console.log("Connection opened!");
+
+			pc.addEventListener('icecandidate', e => {
+				if(e.candidate){
+					console.log(e.candidate);
+					socket.emit('icecandidate', e.candidate);
+				}
+			});
+
+			pc.addEventListener('connectionstatechange', e => {
+				console.log(e);
+			});
+
+			pc.createOffer().then(offer => {
+				pc.setLocalDescription(offer)
+				  .then(_ => socket.emit('offer', {offer : offer, room : roomName}));
+			});
+		}
+	</script>
+
+</body>
+</html>
