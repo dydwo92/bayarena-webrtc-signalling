@@ -1,11 +1,26 @@
 const express = require('express');
 const app = express();
-const http = require('http');
-const server = http.createServer(app);
+const https = require('https');
 const { Server } = require("socket.io");
-const io = new Server(server);
+const fs = require('fs');
+const cors = require('cors');
 
-const port = 80;
+const PORT_HTTPS = 7681;
+const PORT_HTTP = 7682;
+
+const options = {
+  key: fs.readFileSync('./rootca.key'),
+  cert: fs.readFileSync('./rootca.crt')
+};
+
+const server = https.createServer(options, app);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    method: ["GET", "POST"]
+  }
+});
 
 //
 // Save offer & candidate lists
@@ -16,16 +31,22 @@ let icecandidates = {};
 //
 // Serve static html page
 //
+app.use(cors());
+app.use('/static', express.static('public'));
+
+app.set('view engine', 'ejs');
+app.engine('html', require('ejs').renderFile);
+
 app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/index.html');
+  res.render('index.html');
 });
 
 app.get('/local', (req, res) => {
-  res.sendFile(__dirname + '/local.html');
+  res.render('local.html');
 });
 
 app.get('/remote', (req, res) => {
-  res.sendFile(__dirname + '/remote.html');
+  res.render('remote.html');
 });
 
 //
@@ -35,32 +56,34 @@ io.on('connection', socket => {
   let id = socket.id;
 
   console.log(`a user connected ${id}`);
-  
-  // Notify client id
-  socket.emit('id', id);
 
   // Join remote if local exist
-  socket.on('join', rid => {
+  socket.on('join', roomName => {
     let rooms = io.sockets.adapter.rooms;
-    let room = rooms.get(`host:${rid}`);
+    let room = rooms.get(roomName);
 
     if(room == undefined){
-      return;
-    }
-
-    if(room.size == 1){
-      socket.join(`host:${rid}`);
-      socket.emit('offer', offers[rid]);
-      icecandidates[rid].forEach(candidate => {
+      socket.emit('state', 'no room');
+    }else if(room.size == 1){
+      let host = [...room][0];
+      socket.join(roomName);
+      socket.emit('state', 'entered');
+      socket.emit('offer', offers[host]);
+      icecandidates[host].forEach(candidate => {
         socket.emit('icecandidate', candidate);
       });
+    }else{
+      socket.emit('state', 'full');
     }
+
   });
 
   // Create room, save local offer
-  socket.on('offer', offer => {
-    offers[id] = offer.offer;
-    socket.join(`host:${id}`);
+  socket.on('create', create => {
+    offers[id] = create.offer;
+    icecandidates[id] = [];
+    socket.join(create.room);
+      socket.emit('state', 'created');
   });
 
   // Send answer to local
@@ -73,11 +96,7 @@ io.on('connection', socket => {
   });
 
   socket.on('icecandidate', candidate => {
-    // Save icecandidate if local
-    if(socket.rooms.has(`host:${id}`)){
-      if(!icecandidates.hasOwnProperty(id)){
-        icecandidates[id] = [];
-      }
+    if(icecandidates.hasOwnProperty(id)){
       icecandidates[id].push(candidate);
     }
 
@@ -95,30 +114,9 @@ io.on('connection', socket => {
 
 });
 
-io.of("/").adapter.on("leave-room", (room, id) => {
-  // If client is host delete offers, icecandidates
-  // remove room
-  if(room == `host:${id}`){
-    let clientsList = io.sockets.adapter.rooms.get(room)
-
-    delete offers[id];
-    delete icecandidates[id];
-
-    io.to(room).emit('lost');
-
-    clientsList.forEach((s) => {
-      io.sockets.sockets.get(s).leave(room);
-    });
-  }
-  // If client is not host just leve
-  else if(room != id){
-    io.to(room).emit('lost');
-  }
-});
-
 //
 // Start server
 //
-server.listen(port, () => {
-  console.log(`listening on *:${port}`);
+server.listen(PORT_HTTPS, () => {
+  console.log(`listening on *:${PORT_HTTPS}`);
 });

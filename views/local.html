@@ -4,14 +4,18 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title></title>
+
+	<link rel="stylesheet" type="text/css" href="/static/css/local.css">
 </head>
 <body>
 
-	<p id="uuid"></p>
-	<input type="text" id="room">
-	<button id="startBtn">Start</button>
+	<div id="header">
+		<span>Live UUID : </span>
+		<input type="text" id="room">
+		<button id="startBtn">Start</button>
+	</div>
 	<video id="gum-local" autoplay playsinline></video>
-	<input type="range" min="0" max="100" value="0" id="myRange">
+	<input type="range" min="0" max="100" value="0" class="slider" id="myRange">
 
 	<script type="module">
 		import { io } from "https://cdn.socket.io/4.3.2/socket.io.esm.min.js";
@@ -20,18 +24,17 @@
 			iceServers : [{
 				urls: ["stun:stun.l.google.com:19302"]
 			},{
-				urls: "turn:13.125.250.138", credential: 'pass', username: 'usr'
+				urls: "turn:3.38.108.27", credential: 'pass', username: 'usr'
 			}]
 		};
 
 		const videoElement = document.querySelector('video');
 		const sliderInput = document.getElementById('myRange');
-		const uuidElement = document.getElementById('uuid');
 		const roomInput = document.getElementById('room');
 		const startButton = document.getElementById('startBtn');
 
-		let pc = new RTCPeerConnection(config);
-		const dc = pc.createDataChannel("channel");
+		let pc = {};
+		let dc = {};
 
 		const localStream = await navigator.mediaDevices.getUserMedia({
 			'video': true,
@@ -50,10 +53,6 @@
 		// Websocket
 		var socket = io();
 
-		socket.on('id', msg => {
-			uuidElement.innerHTML = msg;
-		});
-
 		socket.on('icecandidate', candidate => {
 			console.log(candidate);
 			pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -64,11 +63,14 @@
 			pc.setRemoteDescription(new RTCSessionDescription(answer));
 		});
 
-		socket.on('lost', _ => {
-			alert('lost!');
+		socket.on('state', state => {
+			alert(state);
 		});
 
 		function start(roomName){
+			pc = new RTCPeerConnection(config);
+			dc = pc.createDataChannel("channel");
+
 			localStream.getTracks().forEach(track => {
 				pc.addTrack(track, localStream);
 			});
@@ -84,12 +86,18 @@
 			});
 
 			pc.addEventListener('connectionstatechange', e => {
-				console.log(e);
+				let connectionState = e.currentTarget.connectionState;
+				switch(connectionState){
+					case 'disconnected' :
+						alert(connectionState);
+						start(roomName);
+						break;
+				}
 			});
 
 			pc.createOffer().then(offer => {
 				pc.setLocalDescription(offer)
-				  .then(_ => socket.emit('offer', {offer : offer, room : roomName}));
+				  .then(_ => socket.emit('create', {offer : offer, room : roomName}));
 			});
 		}
 	</script>
